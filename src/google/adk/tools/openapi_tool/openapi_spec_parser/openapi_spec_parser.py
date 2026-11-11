@@ -44,7 +44,32 @@ _VALID_SCHEMA_TYPES: Set[str] = frozenset({
     "string",
 })
 
-_SCHEMA_CONTAINER_KEYS: Set[str] = frozenset({"schema", "schemas"})
+_SCHEMA_MAP_KEYS = frozenset({
+    "$defs",
+    "definitions",
+    "dependencies",
+    "dependentSchemas",
+    "patternProperties",
+    "properties",
+})
+_SCHEMA_CHILD_KEYS = frozenset({
+    "additionalItems",
+    "additionalProperties",
+    "allOf",
+    "anyOf",
+    "contains",
+    "contentSchema",
+    "else",
+    "if",
+    "items",
+    "not",
+    "oneOf",
+    "prefixItems",
+    "propertyNames",
+    "then",
+    "unevaluatedItems",
+    "unevaluatedProperties",
+})
 
 
 class OperationEndpoint(BaseModel):
@@ -157,12 +182,22 @@ class OpenApiSpecParser:
         if in_schema:
           sanitize_type_field(obj)
 
-        # Recursively process all values in the dict
         for key, value in obj.items():
-          obj[key] = sanitize_recursive(
-              value,
-              in_schema=in_schema or key in _SCHEMA_CONTAINER_KEYS,
-          )
+          if (in_schema and key in _SCHEMA_MAP_KEYS) or (
+              not in_schema and key == "schemas"
+          ):
+            if isinstance(value, dict):
+              obj[key] = {
+                  name: sanitize_recursive(schema, in_schema=True)
+                  for name, schema in value.items()
+              }
+          elif in_schema:
+            # Defaults, enums, examples, and extension values are application
+            # data, not schemas, even when they contain a key named "type".
+            if key in _SCHEMA_CHILD_KEYS:
+              obj[key] = sanitize_recursive(value, in_schema=True)
+          else:
+            obj[key] = sanitize_recursive(value, in_schema=key == "schema")
         return obj
       elif isinstance(obj, list):
         return [sanitize_recursive(item, in_schema=in_schema) for item in obj]

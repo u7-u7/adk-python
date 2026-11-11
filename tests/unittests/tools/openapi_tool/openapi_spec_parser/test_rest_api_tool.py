@@ -3736,6 +3736,59 @@ def test_snake_to_lower_camel():
   assert snake_to_lower_camel("alreadyCamelCase") == "alreadyCamelCase"
 
 
+async def test_openapi_toolset_sends_object_default_without_rewriting_type():
+  """Schema sanitization preserves the body default sent to the HTTP API."""
+  sent = []
+
+  def handle(request):
+    sent.append(json.loads(request.content))
+    return httpx.Response(200, json={"ok": True})
+
+  payload = {"type": "Customer", "nested": {"type": "STRING"}}
+  spec = {
+      "openapi": "3.1.0",
+      "info": {"title": "Records", "version": "1"},
+      "servers": [{"url": "https://example.com"}],
+      "paths": {
+          "/records": {
+              "post": {
+                  "operationId": "create_record",
+                  "requestBody": {
+                      "content": {
+                          "application/json": {
+                              "schema": {
+                                  "type": "object",
+                                  "properties": {
+                                      "payload": {
+                                          "type": "object",
+                                          "default": payload,
+                                      }
+                                  },
+                                  "required": ["payload"],
+                              }
+                          }
+                      }
+                  },
+                  "responses": {"200": {"description": "OK"}},
+              }
+          }
+      },
+  }
+  toolset = OpenAPIToolset(
+      spec_dict=spec,
+      httpx_client_factory=lambda: httpx.AsyncClient(
+          transport=httpx.MockTransport(handle)
+      ),
+  )
+
+  result = await toolset.get_tool("create_record").run_async(
+      args={}, tool_context=None
+  )
+
+  assert result == {"ok": True}
+  assert sent == [{"payload": payload}]
+
+
 def _build_parsed_operation(
     operation: Operation,
     parameters=None,

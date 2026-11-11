@@ -960,3 +960,104 @@ def test_sanitize_schema_types_removes_all_invalid_list(openapi_spec_generator):
 
   # Type field should be removed entirely
   assert "type" not in sanitized["schema"]
+
+
+@pytest.mark.parametrize(
+    "keyword", ["default", "const", "enum", "example", "examples"]
+)
+def test_parse_preserves_schema_literal_values(openapi_spec_generator, keyword):
+  """Schema normalization must not rewrite application data named type."""
+  literal = {"type": "Customer", "nested": {"type": "STRING"}}
+  value = [literal] if keyword in ("enum", "examples") else literal
+  spec = create_minimal_openapi_spec()
+  schema = {"type": "OBJECT", keyword: value}
+  spec["paths"]["/test"]["get"]["responses"]["200"]["content"][
+      "application/json"
+  ]["schema"] = schema
+
+  parsed = openapi_spec_generator.parse(spec)[0].return_value.param_schema
+
+  assert parsed.type == "object"
+  assert getattr(parsed, keyword) == value
+  assert schema == {"type": "OBJECT", keyword: value}
+
+
+@pytest.mark.parametrize(
+    "keyword",
+    [
+        "properties",
+        "patternProperties",
+        "$defs",
+        "definitions",
+        "dependencies",
+        "dependentSchemas",
+    ],
+)
+def test_sanitize_schema_maps_preserve_literal_property_names(
+    openapi_spec_generator, keyword
+):
+  """Schema map entries are schemas even when named after data keywords."""
+  spec = {
+      "schema": {
+          keyword: {
+              "default": {"type": "STRING", "default": {"type": "Customer"}},
+              "type": {"type": "Any"},
+          }
+      }
+  }
+
+  sanitized = openapi_spec_generator._sanitize_schema_types(spec)
+
+  assert sanitized["schema"][keyword] == {
+      "default": {"type": "string", "default": {"type": "Customer"}},
+      "type": {},
+  }
+
+
+@pytest.mark.parametrize(
+    "keyword",
+    [
+        "additionalItems",
+        "additionalProperties",
+        "contains",
+        "contentSchema",
+        "else",
+        "if",
+        "items",
+        "not",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+    ],
+)
+def test_sanitize_nested_schemas_preserves_defaults(
+    openapi_spec_generator, keyword
+):
+  """Nested schemas are normalized without changing their default data."""
+  spec = {
+      "schema": {keyword: {"type": "OBJECT", "default": {"type": "Customer"}}}
+  }
+
+  sanitized = openapi_spec_generator._sanitize_schema_types(spec)
+
+  assert sanitized["schema"][keyword] == {
+      "type": "object",
+      "default": {"type": "Customer"},
+  }
+
+
+@pytest.mark.parametrize("keyword", ["allOf", "anyOf", "oneOf", "prefixItems"])
+def test_sanitize_schema_lists_preserves_defaults(
+    openapi_spec_generator, keyword
+):
+  """Schemas in lists are normalized without changing their default data."""
+  spec = {
+      "schema": {keyword: [{"type": "OBJECT", "default": {"type": "Customer"}}]}
+  }
+
+  sanitized = openapi_spec_generator._sanitize_schema_types(spec)
+
+  assert sanitized["schema"][keyword] == [
+      {"type": "object", "default": {"type": "Customer"}}
+  ]
